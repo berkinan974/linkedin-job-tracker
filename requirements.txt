@@ -1,0 +1,28 @@
+# Browser Otomasyon
+playwright==1.44.0
+
+# Veritabanı
+# (SQLite Python'da built-in gelir, ek paket gerekmez)
+
+# AI
+anthropic==0.28.0
+
+# PDF İşleme
+pypdf==4.3.1              # PDF okuma (derleme gerektirmez)
+reportlab==4.2.2          # PDF yazma/düzenleme
+python-docx==1.1.2        # Alternatif DOCX düzenleme
+Pillow>=10.0.0            # Profil fotoğrafı daire kırpma
+
+# Veri İşleme
+pandas==2.2.2
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# Dashboard
+streamlit==1.35.0
+
+# Yardımcı
+python-dotenv==1.0.1
+loguru==0.7.2
+rich==13.7.1              # Terminal çıktısı güzelleştirme
+plyer>=2.1.0              # Windows toast bildirimleri
