@@ -227,6 +227,19 @@ def _get_user_context() -> str:
     return "\n".join(f"- {r[0]}: {r[1]}" for r in rows)
 
 
+def _get_job_description(job_id: int | None) -> str:
+    """AI cevabını ilanın aradığı kriterlere göre hizalamak için açıklamayı getir."""
+    if job_id is None:
+        return ""
+    conn = sqlite3.connect(DB_PATH, timeout=15)
+    conn.execute("PRAGMA journal_mode=WAL")
+    row = conn.execute(
+        "SELECT description FROM jobs WHERE id = ?", (job_id,)
+    ).fetchone()
+    conn.close()
+    return (row[0] or "")[:2000] if row else ""
+
+
 # ─── Cevap Üretimi ────────────────────────────────────────────────────────────
 
 def _rule_answer(question_text: str, options: list[str]) -> str | None:
@@ -242,20 +255,25 @@ def _rule_answer(question_text: str, options: list[str]) -> str | None:
     return None
 
 
-def _ai_answer(question_text: str, options: list[str]) -> str | None:
+def _ai_answer(question_text: str, options: list[str], job_id: int | None = None) -> str | None:
     context = _get_user_context()
     context_block = (
         f"\n\nKullanicinin daha once verdigi cevaplar (baz al):\n{context}"
         if context else ""
     )
+    job_desc = _get_job_description(job_id)
+    job_block = f"\n\n## Ilan Aciklamasi (aranan kriterler)\n{job_desc}" if job_desc else ""
     opts_block = (
         "\n".join(f"- {o}" for o in options)
         if options else "Serbest metin giris"
     )
     prompt = (
         f"LinkedIn Easy Apply formunda su soru soruldu. "
-        f"Adayin CV profili ve onceki cevaplarina gore en uygun cevabi ver.\n\n"
-        f"## Aday Profili\n{CV_PROFILE}{context_block}\n\n"
+        f"Adayin CV profiline ve ilanin aradigi kriterlere gore en uygun cevabi ver — "
+        f"cevap adayin gercek CV'sinde karsiligi olan, dogru bir cevap olmali; "
+        f"adayda olmayan bir deneyim/nitelik uydurma, sadece ilanin dilini/vurgusunu "
+        f"yansitacak sekilde dogru bilgiyi ifade et.\n\n"
+        f"## Aday Profili\n{CV_PROFILE}{context_block}{job_block}\n\n"
         f"## Soru\n{question_text}\n\n"
         f"## Secenekler\n{opts_block}\n\n"
         f"Sadece cevabi yaz. Secenekler varsa tam olarak bir secenegi yaz. "
@@ -304,7 +322,7 @@ def resolve(question_text: str, question_type: str, options: list[str],
     _salary_kw = ("maaş", "salary", "ücret", "ucret", "wage", "compensation")
     _is_salary = any(k in _norm(question_text) for k in _salary_kw)
     if not answer and not ((question_type in ("number", "text") and not options) or _is_salary):
-        answer = _ai_answer(question_text, options)
+        answer = _ai_answer(question_text, options, job_id=job_id)
         if answer:
             source = "ai"
 

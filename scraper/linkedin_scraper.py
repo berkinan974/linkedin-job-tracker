@@ -23,7 +23,7 @@ from config.settings import (
     LINKEDIN_EMAIL, LINKEDIN_PASSWORD,
     SEARCH_JOBS, SEARCH_LOCATIONS, WORK_TYPES,
     EXPERIENCE_LEVELS, MAX_JOBS_PER_SEARCH, DB_PATH,
-    OPERA_EXE, OPERA_PROFILE,
+    OPERA_EXE, OPERA_PROFILE, AUTOMATION_WINDOW_ARGS,
 )
 
 console = Console()
@@ -264,7 +264,7 @@ class LinkedInScraper:
                 executable_path=OPERA_EXE,
                 headless=self.headless,
                 slow_mo=50,
-                args=["--start-maximized"],
+                args=AUTOMATION_WINDOW_ARGS,
                 viewport={"width": 1280, "height": 800},
             )
             self.page = await context.new_page()

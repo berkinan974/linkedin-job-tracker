@@ -21,7 +21,7 @@ from rich.progress import track
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
-from config.settings import ANTHROPIC_API_KEY, DB_PATH, CV_INPUT, MIN_MATCH_SCORE
+from config.settings import ANTHROPIC_API_KEY, DB_PATH, MIN_MATCH_SCORE, CV_PROFILES
 
 console = Console()
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -29,12 +29,22 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 # ─── CV Özeti (bir kez okunur) ────────────────────────────────────────────────
 
 def load_cv_text() -> str:
-    """CV PDF'inden metin çıkar."""
+    """
+    3 statik CV profilinin (TR) metnini birleştirip döndürür, böylece AI eşleşme
+    skorunu adayın tüm kategorilerdeki (Signal/Embedded, Software/AI, Power
+    Electronics) toplam yetkinliğine göre hesaplar. CV seçimi ayrı bir adımda
+    (cv_manager.select_cv_profile) yapılır — burası sadece skorlama içindir.
+    """
     try:
         from pypdf import PdfReader
-        reader = PdfReader(CV_INPUT)
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        return text.strip()
+        parts = []
+        for profile in CV_PROFILES:
+            path = Path(__file__).parent.parent / profile["cv_tr"]
+            if not path.exists():
+                continue
+            reader = PdfReader(str(path))
+            parts.append("\n".join(page.extract_text() or "" for page in reader.pages))
+        return "\n\n".join(parts).strip()
     except Exception as e:
         logger.warning(f"CV okunamadı: {e}")
         return "CV bilgisi yüklenemedi."
@@ -141,13 +151,14 @@ async def fetch_descriptions():
 
     logger.info(f"{len(jobs)} ilanın açıklaması çekilecek...")
 
-    from config.settings import OPERA_EXE, OPERA_PROFILE
+    from config.settings import OPERA_EXE, OPERA_PROFILE, AUTOMATION_WINDOW_ARGS
     async with async_playwright() as pw:
         context = await pw.chromium.launch_persistent_context(
             user_data_dir=OPERA_PROFILE,
             executable_path=OPERA_EXE,
             headless=False,
             slow_mo=30,
+            args=AUTOMATION_WINDOW_ARGS,
             viewport={"width": 1280, "height": 800},
         )
         page = await context.new_page()
@@ -288,7 +299,7 @@ async def run(skip_fetch: bool = False):
     console.print("\n[bold cyan]Aşama 2: AI analizi yapılıyor...[/bold cyan]")
     cv_text = load_cv_text()
     if not cv_text or cv_text == "CV bilgisi yüklenemedi.":
-        console.print("[red]CV okunamadı! data/cvs/cv_original.pdf mevcut mu?[/red]")
+        console.print("[red]CV okunamadı! CV_PROFILES içindeki TR dosyaları mevcut mu?[/red]")
         return
 
     jobs = get_unanalyzed_jobs()

@@ -20,7 +20,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from config.settings import (
     LINKEDIN_EMAIL, LINKEDIN_PASSWORD,
     DB_PATH, CV_OUTPUT, APPLY_AUTOMATICALLY,
-    MIN_MATCH_SCORE, OPERA_EXE, OPERA_PROFILE,
+    MIN_MATCH_SCORE, OPERA_EXE, OPERA_PROFILE, AUTOMATION_WINDOW_ARGS,
 )
 from applicator.question_handler import resolve, init_question_bank, log_answer
 
@@ -82,10 +82,12 @@ class LinkedInApplicator:
 
     PHONE = "05380740009"  # CV'deki telefon numarası
 
-    def __init__(self, headless: bool = False, dry_run: bool = False, limit: int | None = None):
+    def __init__(self, headless: bool = False, dry_run: bool = False, limit: int | None = None,
+                 max_real_applications: int | None = None):
         self.headless = headless
         self.dry_run  = dry_run
         self.limit    = limit
+        self.max_real_applications = max_real_applications
         self.page     = None
         self.results  = []   # (job, "applied" | "skipped" | "no_easy_apply" | "error")
         init_question_bank()
@@ -122,6 +124,7 @@ class LinkedInApplicator:
         try:
             await self.page.goto(job["url"], wait_until="domcontentloaded", timeout=30000)
             await self.page.wait_for_timeout(2000)
+            url_before_click = self.page.url
 
             # Sayfa yüklenir yüklenmez limit kontrolü (buton gizlenmiş olabilir)
             if await self._check_daily_limit():
@@ -144,6 +147,19 @@ class LinkedInApplicator:
             # Günlük limit kontrolü
             if await self._check_daily_limit():
                 return "daily_limit"
+
+            # Bazı ilanlar (Ceipal, Greenhouse vb. üçüncü parti ATS) native modal
+            # yerine tam sayfa yönlendirmesi yapıyor — bunları desteklemiyoruz,
+            # sessizce "error" vermek yerine ayrı statüyle atla.
+            modal = await self.page.query_selector(
+                ".jobs-easy-apply-modal, [data-test-modal]"
+            )
+            if not modal and self.page.url != url_before_click:
+                logger.info(
+                    f"  Üçüncü parti ATS yönlendirmesi (native modal değil), atlanıyor: "
+                    f"{job['title']} @ {job['company']} → {self.page.url}"
+                )
+                return "external_ats"
 
             # Modal adımlarını yönet
             result = await self._handle_modal(cv_path, job["id"])
@@ -247,7 +263,14 @@ class LinkedInApplicator:
                 ".jobs-easy-apply-modal, [data-test-modal]"
             )
             if not modal:
-                logger.warning("  Modal kapandı — beklenmedik durum.")
+                logger.warning(
+                    f"  Modal kapandı — beklenmedik durum. Sayfa URL: {self.page.url}"
+                )
+                try:
+                    await self.page.screenshot(path="debug_modal.png", full_page=False)
+                    logger.info("  Screenshot kaydedildi: debug_modal.png")
+                except Exception:
+                    pass
                 return "error"
 
             # Tüm soruları cevapla (radio, dropdown, numeric, text)
@@ -699,7 +722,7 @@ class LinkedInApplicator:
                 executable_path=OPERA_EXE,
                 headless=self.headless,
                 slow_mo=80,
-                args=["--start-maximized"],
+                args=AUTOMATION_WINDOW_ARGS,
                 viewport={"width": 1280, "height": 800},
             )
             self.page = await context.new_page()
@@ -730,6 +753,11 @@ class LinkedInApplicator:
 
                 if outcome == "applied" and not self.dry_run:
                     mark_applied(job["id"])
+                    if self.max_real_applications is not None:
+                        self.max_real_applications -= 1
+                        if self.max_real_applications <= 0:
+                            logger.info("Gerçek başvuru sınırına ulaşıldı, durduruluyor.")
+                            break
 
                 if outcome == "daily_limit":
                     logger.warning("Günlük limit doldu, yarın devam edilecek.")
@@ -752,6 +780,7 @@ class LinkedInApplicator:
             "applied":       "green",
             "skipped":       "yellow",
             "no_easy_apply": "dim",
+            "external_ats":  "dim",
             "no_cv":         "red",
             "error":         "red",
         }
@@ -781,11 +810,18 @@ if __name__ == "__main__":
     dry_run  = "--dry-run"  in sys.argv
     headless = "--headless" in sys.argv
     limit    = None
+    max_apply = None
     for arg in sys.argv:
         if arg.startswith("--limit="):
             try:
                 limit = int(arg.split("=")[1])
             except ValueError:
                 pass
-    applicator = LinkedInApplicator(headless=headless, dry_run=dry_run, limit=limit)
+        if arg.startswith("--max-apply="):
+            try:
+                max_apply = int(arg.split("=")[1])
+            except ValueError:
+                pass
+    applicator = LinkedInApplicator(headless=headless, dry_run=dry_run, limit=limit,
+                                     max_real_applications=max_apply)
     asyncio.run(applicator.run())

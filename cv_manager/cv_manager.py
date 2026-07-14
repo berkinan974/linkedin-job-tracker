@@ -4,6 +4,8 @@ CV Manager — Canva Tasarımına Uygun
 import sqlite3
 import json
 import io
+import re
+import shutil
 from pathlib import Path
 
 import anthropic
@@ -22,7 +24,7 @@ from rich.console import Console
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
-from config.settings import ANTHROPIC_API_KEY, DB_PATH, CV_OUTPUT, MIN_MATCH_SCORE
+from config.settings import ANTHROPIC_API_KEY, DB_PATH, CV_OUTPUT, MIN_MATCH_SCORE, CV_PROFILES
 
 console = Console()
 client  = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -711,6 +713,42 @@ def mark_cv_ready(job_id: int, cv_path: str):
     conn.close()
 
 
+# ─── Statik CV Profil Seçimi (AI ile içerik değiştirmez) ──────────────────────
+
+def _detect_language(job: dict) -> str:
+    """Basit dil tespiti: metinde Türkçe'ye özgü karakter var mı?"""
+    text = f"{job.get('title', '')} {job.get('description', '')}"
+    turkish_chars = set("çşğıöüÇŞĞİÖÜ")
+    if any(ch in turkish_chars for ch in text):
+        return "tr"
+    return "en"
+
+
+def select_cv_profile(job: dict) -> str | None:
+    """
+    İlana en uygun statik CV profilini seç (kategori + dil).
+    En çok anahtar kelime eşleşen profil kazanır; hiç eşleşme yoksa None döner
+    (CV üretilmez, ilan atlanır). Profilin o dilde CV'si yoksa (örn. Power
+    Electronics'in EN versiyonu) da None döner.
+    """
+    text = f"{job.get('title', '')} {job.get('description', '')} {job.get('required_skills', '')}".lower()
+
+    best_profile, best_score = None, 0
+    for profile in CV_PROFILES:
+        score = sum(
+            1 for kw in profile["keywords"]
+            if re.search(r'\b' + re.escape(kw.lower()) + r'\b', text)
+        )
+        if score > best_score:
+            best_profile, best_score = profile, score
+
+    if best_profile is None:
+        return None
+
+    lang = _detect_language(job)
+    return best_profile["cv_tr"] if lang == "tr" else best_profile["cv_en"]
+
+
 # ─── Ana Akış ─────────────────────────────────────────────────────────────────
 
 def run():
@@ -721,24 +759,27 @@ def run():
         console.print(f"[yellow]Eslesme skoru >= {MIN_MATCH_SCORE} olan analiz edilmis ilan yok.[/yellow]")
         return
 
-    console.print(f"\n[bold cyan]{len(jobs)} ilan icin CV ozellestiriliyor...[/bold cyan]\n")
+    console.print(f"\n[bold cyan]{len(jobs)} ilan icin CV seciliyor...[/bold cyan]\n")
 
+    selected, skipped = 0, 0
     for job in jobs:
-        import re
         raw = f"{job['company']}_{job['title']}"
         safe_name = re.sub(r'[^\w\-]', '_', raw.replace('\n', '').replace('\r', ''))
         safe_name = re.sub(r'_+', '_', safe_name).strip('_')[:50]
         output_path = str(Path(CV_OUTPUT) / f"CV_{safe_name}.pdf")
 
-        console.print(f"  -> {job['title']} @ {job['company']} (Skor: {job['match_score']:.0f})")
+        profile_path = select_cv_profile(job)
+        if not profile_path:
+            console.print(f"  [yellow]atlandi (uygun CV profili yok): {job['title']} @ {job['company']}[/yellow]")
+            skipped += 1
+            continue
 
-        customized = customize_with_ai(job)
-        build_pdf(job, customized, output_path)
+        shutil.copyfile(profile_path, output_path)
         mark_cv_ready(job["id"], output_path)
+        selected += 1
+        console.print(f"  -> {job['title']} @ {job['company']} (Skor: {job['match_score']:.0f}) -> {Path(profile_path).name}")
 
-        console.print(f"    [green]OK {output_path}[/green]")
-
-    console.print(f"\n[bold green]OK {len(jobs)} CV olusturuldu -> {CV_OUTPUT}[/bold green]")
+    console.print(f"\n[bold green]OK {selected} CV secildi, {skipped} ilan atlandi -> {CV_OUTPUT}[/bold green]")
 
 
 if __name__ == "__main__":
