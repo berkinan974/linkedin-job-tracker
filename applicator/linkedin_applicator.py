@@ -725,6 +725,8 @@ class LinkedInApplicator:
                 args=AUTOMATION_WINDOW_ARGS,
                 viewport={"width": 1280, "height": 800},
             )
+            for old_page in context.pages:
+                await old_page.close()
             self.page = await context.new_page()
 
             # Profil giriş yapılıysa login atla
