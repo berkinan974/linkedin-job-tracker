@@ -155,7 +155,7 @@ class LinkedInScraper:
             new_found = 0
             for card in cards:
                 job = await self._parse_card(card)
-                if job and job["linkedin_id"] and job["linkedin_id"] not in seen_ids:
+                if job and job["linkedin_id"] and job["url"] and job["linkedin_id"] not in seen_ids:
                     seen_ids.add(job["linkedin_id"])
                     jobs.append(job)
                     new_found += 1
