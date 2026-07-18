@@ -22,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from loguru import logger
 
+import config.settings  # noqa: F401 — stdout/stderr'i UTF-8'e zorlar (emoji başlıklar için)
+
 # Log dosyası
 LOG_DIR = Path("data/logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,7 +68,7 @@ async def run_analyzer():
 def run_cv_manager():
     step("Adim 3/4 — CV Manager")
     try:
-        from cv_manager.cv_generator import run as cv_run
+        from cv_manager.cv_manager import run as cv_run
         cv_run()
         logger.success("CV Manager tamamlandi.")
     except Exception as e:

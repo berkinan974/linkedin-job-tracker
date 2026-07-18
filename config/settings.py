@@ -64,7 +64,7 @@ EXPERIENCE_LEVELS = [
 
 # --- Genel Ayarlar ---
 MAX_JOBS_PER_SEARCH = 50      # her aramada kaç ilan
-MIN_MATCH_SCORE     = 0       # yüzde kaç eşleşme olursa başvuru yapılsın
+MIN_MATCH_SCORE     = 65      # GEÇİCİ: günlük limit nedeniyle önce 65+ puanlı ilanlara odaklan (sonra 50+)
 APPLY_AUTOMATICALLY = True    # True yapınca otomatik başvuru açılır (dikkatli!)
 
 # --- Dosya Yolları ---
