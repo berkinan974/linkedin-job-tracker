@@ -152,7 +152,7 @@ class LinkedInApplicator:
             # yerine tam sayfa yönlendirmesi yapıyor — bunları desteklemiyoruz,
             # sessizce "error" vermek yerine ayrı statüyle atla.
             modal = await self.page.query_selector(
-                ".jobs-easy-apply-modal, [data-test-modal]"
+                ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal, dialog"
             )
             if not modal and self.page.url != url_before_click:
                 logger.info(
@@ -213,7 +213,7 @@ class LinkedInApplicator:
         """Modal içeriğinin hash'ini döner (takılma tespiti için)."""
         try:
             modal = await self.page.query_selector(
-                ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal"
+                ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal, dialog"
             )
             if modal:
                 text = await modal.inner_text()
@@ -237,7 +237,7 @@ class LinkedInApplicator:
                         return True
             # Metin tabanlı hata kontrolü
             modal = await self.page.query_selector(
-                ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal"
+                ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal, dialog"
             )
             if modal:
                 text = await modal.inner_text()
@@ -260,7 +260,7 @@ class LinkedInApplicator:
             await self.page.wait_for_timeout(2000)
 
             modal = await self.page.query_selector(
-                ".jobs-easy-apply-modal, [data-test-modal]"
+                ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal, dialog"
             )
             if not modal:
                 logger.warning(
@@ -348,7 +348,7 @@ class LinkedInApplicator:
     async def _has_unanswerable_textarea(self) -> bool:
         """Modal içinde cevaplanamayan (essay tipi) textarea varsa True döner."""
         modal = await self.page.query_selector(
-            ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal"
+            ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal, dialog"
         )
         if not modal:
             return False
@@ -390,7 +390,7 @@ class LinkedInApplicator:
         Tüm sorgular modal scope'una kısıtlıdır — sayfa navigasyonu önlenir.
         """
         modal = await self.page.query_selector(
-            ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal"
+            ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal, dialog"
         )
         if not modal:
             return
@@ -565,7 +565,7 @@ class LinkedInApplicator:
     async def _fill_contact_fields(self):
         """Telefon numarası ve e-posta gibi basit alanları modal içinde doldur."""
         modal = await self.page.query_selector(
-            ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal"
+            ".jobs-easy-apply-modal, [data-test-modal], .artdeco-modal, dialog"
         )
         if not modal:
             return
