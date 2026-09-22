@@ -3,7 +3,7 @@
 :: Bu .bat dosyasini Windows Task Scheduler ile çalıştır.
 :: Öneri: Her sabah 09:00'da otomatik çalıştır.
 
-cd /d "C:\Users\berki\Desktop\linkedin"
+cd /d "%~dp0"
 
 :: Sanal ortamı etkinleştir
 call venv\Scripts\activate.bat

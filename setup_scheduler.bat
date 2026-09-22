@@ -6,7 +6,7 @@ echo LinkedIn Job Tracker zamanlayici kuruluyor...
 
 schtasks /create ^
   /tn "LinkedInJobTracker" ^
-  /tr "\"C:\Users\berki\Desktop\linkedin\schedule_pipeline.bat\"" ^
+  /tr "\"%~dp0schedule_pipeline.bat\"" ^
   /sc DAILY ^
   /st 09:00 ^
   /rl HIGHEST ^

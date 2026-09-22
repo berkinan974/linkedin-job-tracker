@@ -37,14 +37,20 @@ def main():
         asyncio.run(LinkedInScraper(headless=False).run())
 
     elif cmd in ("2", "analyze"):
-        console.print("[yellow]Analiz modülü yakında...[/yellow]")
+        from analyzer.job_analyzer import run as analyze_run
+        import asyncio
+        asyncio.run(analyze_run())
 
     elif cmd in ("3", "dashboard"):
         import subprocess
         subprocess.run(["streamlit", "run", "dashboard/app.py"])
 
     elif cmd in ("4", "apply"):
-        console.print("[yellow]Otomatik başvuru modülü yakında...[/yellow]")
+        from applicator.linkedin_applicator import LinkedInApplicator
+        import asyncio
+        console.print("[yellow]Güvenlik için dry-run modunda çalıştırılıyor (gerçek başvuru yapılmaz).[/yellow]")
+        console.print("[dim]Gerçek başvuru için: python applicator/linkedin_applicator.py --limit=N --max-apply=N[/dim]")
+        asyncio.run(LinkedInApplicator(headless=False, dry_run=True).run())
 
     elif cmd in ("q", "quit", "exit"):
         console.print("Görüşürüz!")
