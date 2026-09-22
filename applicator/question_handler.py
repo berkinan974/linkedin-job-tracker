@@ -23,9 +23,9 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 CV_PROFILE = """
 Ad: Berk İnan
-Bölüm: Elektrik-Elektronik Mühendisliği, Yaşar Üniversitesi (%100 İngilizce), Mayıs 2025 mezunu
+Bölüm: Elektrik-Elektronik Mühendisliği, Yaşar Üniversitesi (%100 İngilizce), Mayıs 2026 mezunu
 Konum: İzmir/Bornova | Telefon: +90 538 074 00 09
-Deneyim: FrikElektronik — Gömülü Sistemler & Donanım Stajyeri (STM32, firmware, devre tasarımı)
+Deneyim: Ermas Elektronik — Gömülü Sistemler & Donanım Stajyeri (STM32, firmware, devre tasarımı)
 Beceriler: Python, MATLAB, STM32, Arduino C/C++, Proteus, Siemens S7-1500, Communication Protocols, ML
 Dil: Türkçe (ana dil), İngilizce (B2), Ukraynaca (başlangıç)
 Uyruk: T.C. vatandaşı | Çalışma izni: Türkiye'de tam yetkili | Askerlik: tecilli
@@ -58,7 +58,7 @@ RULES: list[tuple[list[str], str, str]] = [
       "sıralama", "siralama", "yerleştiğiniz sıralama", "yerlestigi sıralama",
       "osym", "ösym"], "105653", "105653"),
     (["mezuniyet tarih", "mezuniyet ay", "mezun tarih", "graduation date",
-      "when did you graduate", "ne zaman mezun"], "Mayıs 2025", "May 2025"),
+      "when did you graduate", "ne zaman mezun"], "Mayıs 2026", "May 2026"),
     (["kaç dönem", "kac donem", "kac donem kaldigini", "dönem kaldı",
       "mezuniyetinize kac"], "0", "0"),
     (["haftada kaç gün", "haftada kac gun", "kaç gün çalışabilir",

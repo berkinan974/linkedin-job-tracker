@@ -41,13 +41,16 @@ SEARCH_JOBS = [
     # Power Electronics / Hardware
     "Power Electronics Engineer",
     "Güç Elektroniği Mühendisi",
+    # E-ticaret / Marketplace / SEO
+    "E-ticaret Uzmanı",
+    "E-ticaret Operasyon",
+    "Dijital Pazarlama Uzmanı",
+    "SEO Uzmanı",
+    "Marketplace Uzmanı",
 ]
 
 SEARCH_LOCATIONS = [
     "İzmir, Türkiye",
-    "İstanbul, Türkiye",
-    "Ankara, Türkiye",
-    "Türkiye",          # uzaktan ilanlar için
 ]
 
 WORK_TYPES = [
@@ -76,37 +79,60 @@ LOG_PATH            = "data/logs/app.log"
 
 # --- CV Profilleri (statik, ilana göre seçilir — AI içerik değiştirmez) ---
 # Her profil bir kategoriyi temsil eder. "keywords" ilan başlığı/açıklamasında
-# aranır (case-insensitive); en çok eşleşen profil seçilir.
+# aranır (case-insensitive); en çok eşleşen profil seçilir (bkz.
+# cv_manager.select_cv_profile). Daha dar/spesifik profiller önce listelenir
+# ki eşit skor durumunda geniş "comprehensive" profil yerine onlar kazansın.
 CV_PROFILES = [
     {
+        # Dar sinyal işleme / gömülü sistem / RF odaklı CV — yazılım/SaaS
+        # içeriği bilinçli olarak dışarıda tutulmuş, saf donanım/sinyal
+        # ilanlarında daha odaklı görünmesi için.
         "id": "signal_embedded",
         "keywords": [
             "sinyal işleme", "signal processing", "dsp", "rf", "wireless",
             "embedded", "gömülü sistem", "mmwave", "iletişim mühendisi",
-            "communication engineer", "firmware",
+            "communication engineer", "firmware", "beam scanning",
+            "stm32", "mikrodenetleyici", "microcontroller",
         ],
         "cv_tr": "data/cvs/CV_SignalEmbedded_TR.pdf",
         "cv_en": "data/cvs/CV_SignalEmbedded_EN.pdf",
     },
     {
-        "id": "software_ai",
-        "keywords": [
-            "software engineer", "yazılım mühendisi", "backend", "full stack",
-            "fullstack", "python developer", "ai engineer", "ml engineer",
-            "machine learning engineer", "data engineer", "data scientist",
-        ],
-        "cv_tr": "data/cvs/CV_SoftwareAI_TR.pdf",
-        "cv_en": "data/cvs/CV_SoftwareAI_EN.pdf",
-    },
-    {
+        # Güç elektroniği / devre / endüstriyel otomasyon ağırlıklı yedek CV.
         "id": "power_electronics",
         "keywords": [
             "power electronics", "güç elektroniği", "devre tasarım",
             "circuit design", "pcb", "hardware engineer", "donanım mühendisi",
             "elektrik mühendisi", "enerji sistemleri", "power systems",
+            "high voltage", "yüksek gerilim", "industrial automation",
+            "endüstriyel otomasyon", "plc",
         ],
         "cv_tr": "data/cvs/CV_PowerElectronics_TR.pdf",
         "cv_en": None,  # İngilizce versiyon henüz yok — EN ilanlarda bu profil atlanır
+    },
+    {
+        # E-ticaret / marketplace / SEO / dijital pazarlama odaklı CV.
+        "id": "ecommerce",
+        "keywords": [
+            "e-ticaret", "e-ticaret uzmanı", "e-commerce", "etsy", "marketplace",
+            "pazaryeri", "seo", "dijital pazarlama", "digital marketing",
+            "growth marketing", "ürün listeleme", "content optimization",
+        ],
+        "cv_tr": "data/cvs/CV_Ecommerce_TR.pdf",
+        "cv_en": None,  # İngilizce versiyon henüz yok
+    },
+    {
+        # Kapsamlı CV: sinyal işleme + gömülü sistem + yazılım/backend/AI
+        # projelerinin (FleetSync SaaS dahil) tümünü içerir. Yukarıdaki dar
+        # profillere uymayan genel yazılım/mühendislik ilanları için varsayılan.
+        "id": "comprehensive",
+        "keywords": [
+            "software engineer", "yazılım mühendisi", "backend", "full stack",
+            "fullstack", "python developer", "ai engineer", "ml engineer",
+            "machine learning engineer", "data engineer", "data scientist",
+        ],
+        "cv_tr": "data/cvs/CV_Comprehensive_TR.pdf",
+        "cv_en": "data/cvs/CV_Comprehensive_EN.pdf",
     },
 ]
 
