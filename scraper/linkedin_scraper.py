@@ -11,6 +11,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 from loguru import logger
@@ -25,8 +26,27 @@ from config.settings import (
     EXPERIENCE_LEVELS, MAX_JOBS_PER_SEARCH, DB_PATH,
     OPERA_EXE, OPERA_PROFILE, AUTOMATION_WINDOW_ARGS,
 )
+from utils.location import is_allowed_location
 
 console = Console()
+
+_LOCATION_LINE = re.compile(r"\((On-site|Hybrid|Remote|İş yerinde|Hibrit|Uzaktan)\)\s*$")
+
+_SCROLL_JOB_LIST_JS = """
+async () => {
+  let el = document.querySelector('[data-job-id]');
+  while (el && !(/(auto|scroll)/.test(getComputedStyle(el).overflowY)
+                 && el.scrollHeight > el.clientHeight)) {
+    el = el.parentElement;
+  }
+  if (!el) return false;
+  for (let i = 0; i < 30 && el.scrollTop + el.clientHeight < el.scrollHeight - 5; i++) {
+    el.scrollBy(0, 400);
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return true;
+}
+"""
 
 
 # ─── Veritabanı ──────────────────────────────────────────────────────────────
@@ -72,16 +92,23 @@ def init_db():
 
 
 def save_job(job: dict):
-    """Bir ilanı veritabanına kaydet (zaten varsa güncelleme yapma)."""
+    """
+    Bir ilanı veritabanına kaydet. Zaten varsa sadece konumu bilinmiyorsa
+    (eski, kırık selector'la kaydedilmiş kayıtlar) konum/çalışma tipini doldur.
+    """
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.execute("""
-            INSERT OR IGNORE INTO jobs
+            INSERT INTO jobs
                 (linkedin_id, title, company, location, work_type, experience,
                  description, url, search_keyword, search_location)
             VALUES
                 (:linkedin_id, :title, :company, :location, :work_type, :experience,
                  :description, :url, :search_keyword, :search_location)
+            ON CONFLICT(linkedin_id) DO UPDATE SET
+                location  = excluded.location,
+                work_type = excluded.work_type
+            WHERE jobs.location IS NULL OR jobs.location IN ('', '—')
         """, job)
         conn.commit()
     finally:
@@ -120,24 +147,26 @@ class LinkedInScraper:
 
     # ── Arama ─────────────────────────────────────────────────────────────────
 
-    async def search_jobs(self, keyword: str, location: str) -> list[dict]:
-        self._current_keyword  = keyword
-        self._current_location = location
+    async def search_jobs(self, keyword: str, location: dict) -> list[dict]:
         """Belirli bir anahtar kelime + konum için iş ilanı ara."""
+        self._current_keyword  = keyword
+        self._current_location = location["name"]
         jobs = []
         seen_ids = set()
+        filtered_out = 0
         start = 0  # LinkedIn sayfalama parametresi (her sayfada 25 ilan)
 
         params_base = (
-            f"keywords={keyword.replace(' ', '%20')}"
-            f"&location={location.replace(' ', '%20').replace(',', '%2C')}"
+            f"keywords={quote(keyword)}"
+            f"&location={quote(location['name'])}"
+            f"&geoId={location['geo_id']}"
             f"&f_WT=1,2,3"
             f"&f_E=1,2,3"
             f"&f_LF=f_AL"   # Sadece Easy Apply ilanları
             f"&sortBy=DD"
         )
 
-        logger.info(f"Araniyor: '{keyword}' — {location}")
+        logger.info(f"Araniyor: '{keyword}' — {location['name']}")
 
         while len(jobs) < MAX_JOBS_PER_SEARCH:
             url = f"https://www.linkedin.com/jobs/search/?{params_base}&start={start}"
@@ -152,26 +181,31 @@ class LinkedInScraper:
                 logger.warning("İlan kartı bulunamadı, sayfa yapısı değişmiş olabilir.")
                 break
 
-            new_found = 0
+            new_seen, new_kept = 0, 0
             for card in cards:
                 job = await self._parse_card(card)
-                if job and job["linkedin_id"] and job["url"] and job["linkedin_id"] not in seen_ids:
-                    seen_ids.add(job["linkedin_id"])
-                    jobs.append(job)
-                    new_found += 1
-                    if len(jobs) >= MAX_JOBS_PER_SEARCH:
-                        break
+                if not (job and job["linkedin_id"] and job["url"]) or job["linkedin_id"] in seen_ids:
+                    continue
+                seen_ids.add(job["linkedin_id"])
+                new_seen += 1
+                if not is_allowed_location(job["location"]):
+                    filtered_out += 1
+                    continue
+                jobs.append(job)
+                new_kept += 1
+                if len(jobs) >= MAX_JOBS_PER_SEARCH:
+                    break
 
-            logger.info(f"  start={start} → {new_found} yeni ilan (toplam: {len(jobs)})")
+            logger.info(f"  start={start} → {new_kept} yeni ilan (toplam: {len(jobs)})")
 
-            # Yeni ilan gelmediyse dur
-            if new_found == 0:
+            # Sayfada hiç yeni ilan görülmediyse sonuçlar bitti
+            if new_seen == 0:
                 break
 
             start += 25  # sonraki sayfa
             await asyncio.sleep(2)
 
-        logger.info(f"  → {len(jobs)} ilan bulundu.")
+        logger.info(f"  → {len(jobs)} ilan bulundu, {filtered_out} ilan konum dışı olduğu için atlandı.")
         return jobs
 
     # ── Kart Ayrıştırma ───────────────────────────────────────────────────────
@@ -182,13 +216,15 @@ class LinkedInScraper:
             linkedin_id = await card.get_attribute("data-job-id") or ""
             title_el    = await card.query_selector(".job-card-list__title, .job-card-container__link")
             company_el  = await card.query_selector(".job-card-container__company-name, .artdeco-entity-lockup__subtitle")
-            location_el = await card.query_selector(".job-card-container__metadata-item")
             link_el     = await card.query_selector("a[href*='/jobs/view/']")
 
             title    = (await title_el.inner_text()).strip()    if title_el    else "—"
             company  = (await company_el.inner_text()).strip()  if company_el  else "—"
-            location = (await location_el.inner_text()).strip() if location_el else "—"
             url      = await link_el.get_attribute("href")      if link_el     else ""
+
+            # Konum class'ı hash'li; kart metnindeki "Şehir, Türkiye (On-site)" satırını bul
+            lines = [line.strip() for line in (await card.inner_text()).splitlines()]
+            location = next((line for line in lines if _LOCATION_LINE.search(line)), "—")
             if url and not url.startswith("http"):
                 url = "https://www.linkedin.com" + url
 
@@ -211,20 +247,16 @@ class LinkedInScraper:
     # ── Scroll ────────────────────────────────────────────────────────────────
 
     async def _scroll_job_list(self):
-        """Sol paneldeki iş listesini aşağı kaydırarak tüm kartları yükle."""
-        # Önce liste panelini bul
-        list_panel = await self.page.query_selector(".jobs-search-results-list, .scaffold-layout__list")
-        if list_panel:
-            # Paneli yavaşça aşağı kaydır
-            for _ in range(6):
-                await list_panel.evaluate("el => el.scrollBy(0, 500)")
-                await self.page.wait_for_timeout(400)
-        else:
-            # Panel bulunamazsa sayfanın tamamını kaydır
-            for _ in range(6):
+        """
+        Sol paneldeki ilan listesini sonuna kadar kaydır. LinkedIn sadece görünen
+        kartların içeriğini yüklüyor; kaydırılmazsa sayfadaki 25 ilandan ~7'si
+        okunabiliyor. Liste paneli hash'li class taşıdığı için ilk kartın
+        kaydırılabilir atası bulunup o kaydırılır.
+        """
+        if not await self.page.evaluate(_SCROLL_JOB_LIST_JS):
+            for _ in range(10):
                 await self.page.evaluate("window.scrollBy(0, 600)")
-                await self.page.wait_for_timeout(400)
-        # En üste dön
+                await self.page.wait_for_timeout(300)
         await self.page.wait_for_timeout(500)
 
     # ── İlan Detayı ───────────────────────────────────────────────────────────

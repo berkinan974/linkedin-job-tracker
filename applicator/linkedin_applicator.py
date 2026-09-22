@@ -23,13 +23,14 @@ from config.settings import (
     MIN_MATCH_SCORE, OPERA_EXE, OPERA_PROFILE, AUTOMATION_WINDOW_ARGS,
 )
 from applicator.question_handler import resolve, init_question_bank, log_answer
+from utils.location import is_allowed_location
 
 console = Console()
 
 # ─── Veritabanı ───────────────────────────────────────────────────────────────
 
 def get_cv_ready_jobs() -> list[dict]:
-    """Başvuru bekleyen (cv_ready) ilanları getir."""
+    """Başvuru bekleyen (cv_ready) ilanları getir — sadece izinli konumdakiler."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
@@ -39,7 +40,16 @@ def get_cv_ready_jobs() -> list[dict]:
         ORDER BY match_score DESC
     """, (MIN_MATCH_SCORE,)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+
+    jobs = [dict(r) for r in rows]
+    allowed = [j for j in jobs if is_allowed_location(j["location"])]
+    skipped = len(jobs) - len(allowed)
+    if skipped:
+        console.print(
+            f"[yellow]{skipped} ilan konumu izinli değil veya bilinmiyor diye atlandı "
+            f"(scraper'ı çalıştırmak bilinmeyen konumları doldurur).[/yellow]"
+        )
+    return allowed
 
 
 def mark_applied(job_id: int):

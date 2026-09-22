@@ -9,12 +9,14 @@ Her ilanın açıklamasını Claude ile analiz eder:
 """
 
 import asyncio
+import re
 import sqlite3
 import json
 from pathlib import Path
 
 import anthropic
 from loguru import logger
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 from rich.console import Console
 from rich.table import Table
 from rich.progress import track
@@ -22,6 +24,7 @@ from rich.progress import track
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from config.settings import ANTHROPIC_API_KEY, DB_PATH, MIN_MATCH_SCORE, CV_PROFILES
+from utils.location import is_allowed_location
 
 console = Console()
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -62,7 +65,7 @@ def get_unanalyzed_jobs() -> list[dict]:
         WHERE status = 'new' AND description IS NOT NULL AND description != ''
     """).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in rows if is_allowed_location(r["location"])]
 
 
 def get_jobs_without_description() -> list[dict]:
@@ -70,12 +73,12 @@ def get_jobs_without_description() -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
-        SELECT id, title, company, url
+        SELECT id, title, company, location, url
         FROM jobs
         WHERE (description IS NULL OR description = '') AND status = 'new'
     """).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in rows if is_allowed_location(r["location"])]
 
 
 def update_job_analysis(job_id: int, skills: list, score: float, summary: str, advice: str):
@@ -101,10 +104,31 @@ def save_description(job_id: int, description: str):
 
 # ─── Metin Ayıklama ───────────────────────────────────────────────────────────
 
+MAX_DESCRIPTION_CHARS = 5000
+
+# LinkedIn class isimleri her build'de değişen hash'ler; id ve data-testid sabit.
+DESCRIPTION_CONTAINER = '[id^="JobDetails_AboutTheJob"]'
+EXPAND_BUTTON = '[data-testid="expandable-text-button"]'
+
+_HEADINGS = ("About the job", "İş ilanı hakkında")
+_MORE_LINE = re.compile(r"^\s*…\s*(more|daha fazla\w*)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _clean_description(text: str) -> str:
+    text = text.strip()
+    for heading in _HEADINGS:
+        if text.startswith(heading):
+            text = text[len(heading):].strip()
+            break
+    text = _MORE_LINE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text[:MAX_DESCRIPTION_CHARS]
+
+
 def _extract_job_section(body_text: str) -> str:
     """
-    Sayfa metninden iş ilanı açıklama bölümünü çıkar.
-    LinkedIn 'İş ilanı hakkında' başlığını kullanıyor.
+    Yedek yol: açıklama kapsayıcısı bulunamazsa (farklı sayfa düzeni) tüm sayfa
+    metninden başlık/durdurma işaretleriyle açıklamayı ayıkla.
     """
     markers = [
         "İş ilanı hakkında",
@@ -114,30 +138,63 @@ def _extract_job_section(body_text: str) -> str:
         "Pozisyon Hakkında",
     ]
     stop_markers = [
+        "Set alert for similar jobs",
+        "About the company",
+        "Şirket hakkında",
         "Ulaşabileceğiniz kişiler",
         "Benzer iş ilanları",
         "Bu iş ilanını bildirin",
-        "Kaydet",
         "Similar jobs",
         "Report this job",
     ]
 
     for marker in markers:
         idx = body_text.find(marker)
-        if idx != -1:
-            desc = body_text[idx + len(marker):].strip()
-            # Durdurma noktasında kes
-            for stop in stop_markers:
-                stop_idx = desc.find(stop)
-                if stop_idx != -1:
-                    desc = desc[:stop_idx].strip()
-            if len(desc) > 50:
-                return desc[:5000]  # max 5000 karakter
+        if idx == -1:
+            continue
+        desc = body_text[idx + len(marker):]
+        stops = [i for i in (desc.find(s) for s in stop_markers) if i != -1]
+        if stops:
+            desc = desc[:min(stops)]
+        desc = _clean_description(desc)
+        if len(desc) > 50:
+            return desc
 
     return ""
 
 
 # ─── İlan Açıklaması Çekme ────────────────────────────────────────────────────
+
+async def _read_description(page) -> str:
+    """
+    'About the job' kapsayıcısını oku. Uzun açıklamalarda LinkedIn metni
+    "… more" butonuyla kısaltır; okumadan önce bu butona basılır.
+    """
+    # Kapsayıcı önce boş iskelet olarak çiziliyor, metin sonradan doluyor —
+    # görünür olmasını değil, gerçek metin içermesini bekle.
+    try:
+        await page.wait_for_function(
+            "sel => { const e = document.querySelector(sel);"
+            " return !!e && e.innerText.trim().length > 40; }",
+            arg=DESCRIPTION_CONTAINER,
+            timeout=15000,
+        )
+    except PlaywrightTimeout:
+        logger.debug("Açıklama kapsayıcısı dolmadı, sayfa metnine dönülüyor.")
+        return _extract_job_section(await page.inner_text("body"))
+
+    await page.wait_for_timeout(500)
+    container = page.locator(DESCRIPTION_CONTAINER).first
+    expand = container.locator(EXPAND_BUTTON)
+    if await expand.count():
+        try:
+            await expand.first.click(timeout=3000)
+            await page.wait_for_timeout(500)
+        except PlaywrightTimeout:
+            logger.debug("'… more' butonu tıklanamadı, kısaltılmış metin okunuyor.")
+
+    return _clean_description(await container.inner_text())
+
 
 async def fetch_descriptions():
     """Açıklaması olmayan ilanları Playwright ile ziyaret edip açıklamayı çek."""
@@ -178,11 +235,7 @@ async def fetch_descriptions():
         for job in track(jobs, description="Açıklamalar çekiliyor..."):
             try:
                 await page.goto(job["url"], wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(2000)
-
-                # Sayfanın tam metnini al ve "İş ilanı hakkında" bölümünü çıkar
-                body_text = await page.inner_text("body")
-                desc = _extract_job_section(body_text)
+                desc = await _read_description(page)
 
                 if desc:
                     save_description(job["id"], desc)
@@ -201,8 +254,20 @@ async def fetch_descriptions():
 
 # ─── AI Analiz ────────────────────────────────────────────────────────────────
 
-def analyze_job_with_ai(job: dict, cv_text: str) -> dict:
-    """Bir ilanı Claude ile analiz et, CV ile karşılaştır."""
+class AnalysisAborted(RuntimeError):
+    """API hesabı kullanılamıyor (kredi/yetki) — kalan ilanları denemek anlamsız."""
+
+
+def _is_fatal_api_error(e: anthropic.APIStatusError) -> bool:
+    return e.status_code in (401, 403) or "credit balance" in str(e).lower()
+
+
+def analyze_job_with_ai(job: dict, cv_text: str) -> dict | None:
+    """
+    Bir ilanı Claude ile analiz et, CV ile karşılaştır.
+    Geçici hatada None döner (ilan 'new' kalır, sonraki çalıştırmada tekrar
+    denenir); hesap/kredi hatasında AnalysisAborted fırlatır.
+    """
 
     prompt = f"""Sen bir kariyer danışmanısın. Aşağıdaki iş ilanını ve adayın CV'sini analiz et.
 
@@ -238,19 +303,23 @@ apply_advice: "başvur" (70+), "önce hazırlan" (50-69), "atla" (50 altı)"""
             max_tokens=800,
             messages=[{"role": "user", "content": prompt}]
         )
-        text = response.content[0].text.strip()
-        # JSON'u parse et
-        if "```" in text:
-            text = text.split("```")[1].replace("json", "").strip()
+    except anthropic.APIStatusError as e:
+        if _is_fatal_api_error(e):
+            raise AnalysisAborted(str(e)) from e
+        logger.warning(f"AI analiz hatası ({job['title']}): {e}")
+        return None
+    except anthropic.APIError as e:
+        logger.warning(f"AI bağlantı hatası ({job['title']}): {e}")
+        return None
+
+    text = response.content[0].text.strip()
+    if "```" in text:
+        text = text.split("```")[1].replace("json", "").strip()
+    try:
         return json.loads(text)
-    except Exception as e:
-        logger.warning(f"AI analiz hatası: {e}")
-        return {
-            "required_skills": [],
-            "match_score": 0,
-            "summary": "Analiz başarısız.",
-            "apply_advice": "atla"
-        }
+    except json.JSONDecodeError as e:
+        logger.warning(f"AI yanıtı JSON değil ({job['title']}): {e}")
+        return None
 
 
 # ─── Sonuç Tablosu ────────────────────────────────────────────────────────────
@@ -311,17 +380,30 @@ async def run(skip_fetch: bool = False):
 
     console.print(f"{len(jobs)} ilan analiz edilecek...")
 
-    for job in track(jobs, description="AI analizi..."):
-        result = analyze_job_with_ai(job, cv_text)
-        update_job_analysis(
-            job_id=job["id"],
-            skills=result.get("required_skills", []),
-            score=result.get("match_score", 0),
-            summary=result.get("summary", ""),
-            advice=result.get("apply_advice", "atla"),
-        )
+    analyzed, failed = 0, 0
+    try:
+        for job in track(jobs, description="AI analizi..."):
+            result = analyze_job_with_ai(job, cv_text)
+            if result is None:
+                failed += 1
+                continue
+            update_job_analysis(
+                job_id=job["id"],
+                skills=result.get("required_skills", []),
+                score=result.get("match_score", 0),
+                summary=result.get("summary", ""),
+                advice=result.get("apply_advice", "atla"),
+            )
+            analyzed += 1
+    except AnalysisAborted as e:
+        console.print(f"\n[bold red]Analiz durduruldu — Anthropic API kullanılamıyor: {e}[/bold red]")
+        console.print(f"[red]{analyzed} ilan analiz edildi; kalan {len(jobs) - analyzed} ilan 'new' durumunda bekliyor.[/red]")
+        raise
 
-    console.print("\n[bold green]OK Analiz tamamlandi![/bold green]\n")
+    console.print(
+        f"\n[bold green]OK {analyzed} ilan analiz edildi"
+        f"{f', {failed} başarısız (sonraki çalıştırmada tekrar denenecek)' if failed else ''}.[/bold green]\n"
+    )
     show_results()
 
     # Windows bildirimi — score>=60 ilan varsa bildir

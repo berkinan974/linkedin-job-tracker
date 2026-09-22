@@ -49,9 +49,19 @@ SEARCH_JOBS = [
     "Marketplace Uzmanı",
 ]
 
+# LinkedIn yalnızca "location" metnini yok sayıp tüm Türkiye'yi döndürüyor;
+# konumu gerçekten kısıtlayan geoId. Yeni şehir eklemek için geoId'yi
+# https://www.linkedin.com/jobs-guest/api/typeaheadHits?typeaheadType=GEO&query=<şehir>
+# adresinden bul.
 SEARCH_LOCATIONS = [
-    "İzmir, Türkiye",
+    {"name": "İzmir, Türkiye", "geo_id": "104162620"},
 ]
+
+# Arama sonuçlarında yine de başka şehirden ilan sızabiliyor; kayıt, analiz ve
+# başvuru aşamalarında konum bu listeyle tekrar kontrol edilir. Konumu
+# bilinmeyen ilanlar işlenmez.
+ALLOWED_LOCATION_KEYWORDS = ["izmir"]
+ALLOW_REMOTE = True   # "Türkiye (Remote)" gibi uzaktan ilanlar İzmir'den yapılabilir
 
 WORK_TYPES = [
     "remote",
